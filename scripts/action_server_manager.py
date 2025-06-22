@@ -309,7 +309,6 @@ def main() -> None:
             port=int(parts[1]),
             local_port=int(parts[2]) if len(parts) > 2 else None
         )
-        logging.info(f"Client Info: {client_info}")
 
         # --- Step 6: Execute the setup for the chosen mode ---
         logging.info(f"--- Step 6: Setting up mode '{mode}' ---")
