@@ -88,34 +88,41 @@ def get_env_or_fail(var_name: str) -> str:
         raise ServerManagerError(f"Required environment variable '{var_name}' is not set.")
     return value
 
-def decrypt_payload(encrypted_payload: str, key: str) -> str:
-    """Decrypts a payload using OpenSSL via a temporary file to avoid stdin issues."""
-    logging.info("Decrypting payload from commit message (using temp file method).")
+def decrypt_payload(encrypted_payload_hex: str, key: str) -> str:
+    """Decrypts a hex-encoded payload using OpenSSL via a temporary file."""
+    logging.info("Decrypting payload (hex -> base64 -> binary).")
+    
+    try:
+        # Step 1: Decode the hex string back to the original Base64 string
+        encrypted_payload_b64 = bytes.fromhex(encrypted_payload_hex).decode('utf-8')
+        logging.info("Hex payload decoded back to Base64.")
+
+    except (ValueError, TypeError) as e:
+        raise ServerManagerError(f"Failed to decode hex payload: {e}")
+
     command = ["openssl", "enc", "-d", "-aes-256-cbc", "-a", "-pbkdf2", "-md", "sha256", "-pass", f"pass:{key}"]
     
     try:
-        # Create a temporary file to securely pass the payload
+        # Step 2: Use the temporary file method with the restored Base64 payload
         with tempfile.NamedTemporaryFile(mode='w', delete=True, suffix=".txt", encoding='utf-8') as tmp:
-            tmp.write(encrypted_payload)
-            tmp.flush()  # Ensure data is written to disk before openssl reads it
+            tmp.write(encrypted_payload_b64)
+            tmp.flush()
             
-            # Add the input file argument to the command
             command_with_file = command + ["-in", tmp.name]
             
-            # Run the command without the 'input' argument
             process = subprocess.run(command_with_file, capture_output=True, text=True, check=True)
             return process.stdout.strip()
             
     except subprocess.CalledProcessError as e:
         stderr_typed = cast(str | None, e.stderr)
         error_msg = stderr_typed.strip() if stderr_typed else "No stderr output."
-        # Add the full command to the error for maximum debuggability
         full_command_str = " ".join(command + ["-in", "/path/to/tempfile"])
         raise ServerManagerError(f"Payload decryption failed. Command: '{full_command_str}'. Error: {error_msg}")
 
 def parse_commit(commit_message: str) -> tuple[str, str]:
     """Parses the commit message to get the mode and encrypted payload."""
-    match = re.match(r"^(DT|HP|XR): ([\s\S]+)$", commit_message)
+    # The payload is now a long hex string, so the simple regex is fine again.
+    match = re.match(r"^(DT|HP|XR): (.+)$", commit_message)
     if not match:
         raise ServerManagerError("Commit message does not match expected format '[DT|HP|XR]: <payload>'.")
     
