@@ -80,7 +80,7 @@ def encrypt_payload(payload: str, key: str) -> str:
     command = ["openssl", "enc", "-aes-256-cbc", "-a", "-pbkdf2", "-salt", "-md", "sha256", "-pass", f"pass:{key}"]
     try:
         process = subprocess.run(command, input=payload.encode('utf-8'), capture_output=True, check=True)
-        base64_payload = process.stdout
+        base64_payload = process.stdout.strip()
         return base64_payload.hex()
     except subprocess.CalledProcessError as e:
         raise ClientError(f"Payload encryption failed: {e.stderr.decode().strip()}")
