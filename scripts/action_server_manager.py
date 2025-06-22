@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypedDict, cast
@@ -88,16 +89,29 @@ def get_env_or_fail(var_name: str) -> str:
     return value
 
 def decrypt_payload(encrypted_payload: str, key: str) -> str:
-    """Decrypts a payload using OpenSSL."""
-    logging.info("Decrypting payload from commit message.")
+    """Decrypts a payload using OpenSSL via a temporary file to avoid stdin issues."""
+    logging.info("Decrypting payload from commit message (using temp file method).")
     command = ["openssl", "enc", "-d", "-aes-256-cbc", "-a", "-pbkdf2", "-md", "sha256", "-pass", f"pass:{key}"]
+    
     try:
-        process = subprocess.run(command, input=encrypted_payload, capture_output=True, text=True, check=True)
-        return process.stdout.strip()
+        # Create a temporary file to securely pass the payload
+        with tempfile.NamedTemporaryFile(mode='w', delete=True, suffix=".txt", encoding='utf-8') as tmp:
+            tmp.write(encrypted_payload)
+            tmp.flush()  # Ensure data is written to disk before openssl reads it
+            
+            # Add the input file argument to the command
+            command_with_file = command + ["-in", tmp.name]
+            
+            # Run the command without the 'input' argument
+            process = subprocess.run(command_with_file, capture_output=True, text=True, check=True)
+            return process.stdout.strip()
+            
     except subprocess.CalledProcessError as e:
         stderr_typed = cast(str | None, e.stderr)
-        error_msg = stderr_typed.strip() if stderr_typed else ""
-        raise ServerManagerError(f"Payload decryption failed: {error_msg}")
+        error_msg = stderr_typed.strip() if stderr_typed else "No stderr output."
+        # Add the full command to the error for maximum debuggability
+        full_command_str = " ".join(command + ["-in", "/path/to/tempfile"])
+        raise ServerManagerError(f"Payload decryption failed. Command: '{full_command_str}'. Error: {error_msg}")
 
 def parse_commit(commit_message: str) -> tuple[str, str]:
     """Parses the commit message to get the mode and encrypted payload."""
