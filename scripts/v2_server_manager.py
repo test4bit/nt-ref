@@ -6,11 +6,17 @@ import sys
 from pathlib import Path
 from typing import cast
 
-# We can reuse all our existing modules!
-from modules.common import AppError, get_env_or_fail
-from modules.config import ClientInfo
-from modules.crypto import decrypt_payload
-from modules.server_setup import base, wireguard, xray
+
+from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+
+from gh_runner_service.common.exceptions import AppError
+from gh_runner_service.common.utils import get_env_or_fail
+from gh_runner_service.models import ClientInfo
+from gh_runner_service.crypto import decrypt_payload
+from gh_runner_service.services import wireguard, xray_warp, xray_direct
+# We also need to import the base setup function
+from gh_runner_service.services import base_setup
 
 # --- Setup ---
 LOG_FORMAT = "%(asctime)s - %(levelname)s - %(message)s"
