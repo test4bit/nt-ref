@@ -239,16 +239,16 @@ def setup_xray(client: ClientInfo, uuid: str) -> None:
 
 def main() -> None:
     """Main entry point for the server manager script."""
-    parser = argparse.ArgumentParser(description="GitHub Actions Server Manager")
-    _ = parser.add_argument("--commit-message", required=True, help="The git commit message that triggered the action.")
-    args = parser.parse_args()
-
+    
     try:
+        # Get all required values from environment variables.
         encryption_key = get_env_or_fail("GHA_PAYLOAD_KEY")
+        commit_message = get_env_or_fail("COMMIT_MSG")
+        
+        # These are optional depending on the mode.
         wg_private_key = os.getenv("WG_PRIVATE_KEY")
         xray_uuid = os.getenv("XRAY_UUID")
-
-        commit_message = cast(str, args.commit_message)
+        
         mode, encrypted_payload = parse_commit(commit_message)
         decrypted_payload = decrypt_payload(encrypted_payload, encryption_key)
         
