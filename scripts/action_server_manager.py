@@ -8,6 +8,10 @@ import re
 import subprocess
 import sys
 import tempfile
+import base64
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypedDict, cast
@@ -93,44 +97,44 @@ def get_env_or_fail(var_name: str) -> str:
 
 import os # <-- Make sure 'os' is imported at the top of the file
 
-def decrypt_payload(encrypted_payload_hex: str, key: str) -> str:
-    """Decrypts a hex-encoded payload using OpenSSL via stdin and an environment variable for the key."""
-    logging.info("Decrypting payload (hex -> base64 -> binary).")
-    
+def decrypt_payload(encrypted_payload_b64: str, master_key_hex: str) -> str:
+    """
+    Decrypts a payload using AES-GCM with a derived key.
+    Expects a transport-safe string: base64(nonce + ciphertext).
+    """
+    logging.info("Decrypting payload using pure Python cryptography...")
     try:
-        encrypted_payload_b64_bytes = bytes.fromhex(encrypted_payload_hex)
-        logging.info("Hex payload decoded back to Base64 bytes.")
-    except (ValueError, TypeError) as e:
-        raise ServerManagerError(f"Failed to decode hex payload: {e}")
-
-    # --- FIX IS HERE: Change how the password is provided ---
-    # 1. Define the name of the environment variable we will use.
-    key_env_var = "OPENSSL_DECRYPTION_KEY"
-    
-    # 2. Update the command to use the 'env:' syntax.
-    command = ["openssl", "enc", "-d", "-aes-256-cbc", "-a", "-pbkdf2", "-md", "sha256", "-pass", f"env:{key_env_var}"]
-    
-    # 3. Create a copy of the current environment and add our key to it.
-    #    We must pass a copy, otherwise the subprocess won't have PATH, etc.
-    process_env = os.environ.copy()
-    process_env[key_env_var] = key
-    
-    try:
-        # 4. Execute the command, passing our custom environment.
-        process = subprocess.run(
-            command,
-            input=encrypted_payload_b64_bytes,
-            capture_output=True,
-            check=True,
-            env=process_env # Pass the modified environment to the subprocess
+        # The master key from the environment is hex-encoded. Decode it.
+        master_key = bytes.fromhex(master_key_hex)
+        
+        # The payload from the client is Base64 encoded. Decode it.
+        encrypted_payload = base64.b64decode(encrypted_payload_b64)
+        
+        # Use the same fixed salt as the client.
+        salt = b'gha-nat-traversal-salt'
+        
+        # Derive the exact same 32-byte key.
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=100_000
         )
-        return process.stdout.decode('utf-8').strip()
-            
-    except subprocess.CalledProcessError as e:
-        stderr_decoded = e.stderr.decode('utf-8').strip() if e.stderr else "No stderr output."
-        # Use a placeholder in the log to avoid printing the key.
-        log_command_str = " ".join(command).replace(key, "***")
-        raise ServerManagerError(f"Payload decryption failed. Command: '{log_command_str}'. Error: {stderr_decoded}")
+        encryption_key = kdf.derive(master_key)
+
+        # The first 12 bytes are the nonce, the rest is the ciphertext.
+        nonce = encrypted_payload[:12]
+        ciphertext = encrypted_payload[12:]
+        
+        # Decrypt the data.
+        aesgcm = AESGCM(encryption_key)
+        decrypted_bytes = aesgcm.decrypt(nonce, ciphertext, None)
+
+        return decrypted_bytes.decode('utf-8')
+
+    except Exception as e:
+        raise ServerManagerError(f"Pure Python decryption failed: {e}")
+
 def setup_common_environment() -> None:
     """Sets up SSH keys and IP forwarding."""
     logging.info("Configuring common environment settings.")
