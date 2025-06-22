@@ -92,36 +92,38 @@ def get_env_or_fail(var_name: str) -> str:
     return value
 
 def decrypt_payload(encrypted_payload_hex: str, key: str) -> str:
-    """Decrypts a hex-encoded payload using OpenSSL via a temporary file."""
+    """Decrypts a hex-encoded payload using OpenSSL via stdin."""
     logging.info("Decrypting payload (hex -> base64 -> binary).")
     
     try:
-        # Step 1: Decode the hex string back to the original Base64 string
-        encrypted_payload_b64 = bytes.fromhex(encrypted_payload_hex).decode('utf-8')
-        logging.info("Hex payload decoded back to Base64.")
+        # Step 1: Decode the hex string back to the original Base64 string.
+        # It's crucial that this is now bytes, not a string, to pass to stdin.
+        encrypted_payload_b64_bytes = bytes.fromhex(encrypted_payload_hex)
+        logging.info("Hex payload decoded back to Base64 bytes.")
 
     except (ValueError, TypeError) as e:
         raise ServerManagerError(f"Failed to decode hex payload: {e}")
 
+    # The command no longer needs the '-in' argument.
     command = ["openssl", "enc", "-d", "-aes-256-cbc", "-a", "-pbkdf2", "-md", "sha256", "-pass", f"pass:{key}"]
     
     try:
-        # Step 2: Use the temporary file method with the restored Base64 payload
-        with tempfile.NamedTemporaryFile(mode='w', delete=True, suffix=".txt", encoding='utf-8') as tmp:
-            tmp.write(encrypted_payload_b64)
-            tmp.flush()
-            
-            command_with_file = command + ["-in", tmp.name]
-            
-            process = subprocess.run(command_with_file, capture_output=True, text=True, check=True)
-            return process.stdout.strip()
+        # Step 2: Pass the Base64 bytes directly to the command's stdin.
+        process = subprocess.run(
+            command,
+            input=encrypted_payload_b64_bytes, # Pass bytes to stdin
+            capture_output=True,
+            check=True,
+            text=True # Still decode stdout/stderr as text
+        )
+        return process.stdout.strip()
             
     except subprocess.CalledProcessError as e:
         stderr_typed = cast(str | None, e.stderr)
         error_msg = stderr_typed.strip() if stderr_typed else "No stderr output."
-        full_command_str = " ".join(command + ["-in", "/path/to/tempfile"])
+        # The command in the log is now simpler and more accurate
+        full_command_str = " ".join(command)
         raise ServerManagerError(f"Payload decryption failed. Command: '{full_command_str}'. Error: {error_msg}")
-
 
 def setup_common_environment() -> None:
     """Sets up SSH keys and IP forwarding."""
