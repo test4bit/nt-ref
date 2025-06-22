@@ -162,7 +162,11 @@ def main():
             raise ClientError(f"Workflow run {run_id} failed or was cancelled.")
 
     except (ClientError, subprocess.CalledProcessError) as e:
+    if isinstance(e, subprocess.CalledProcessError) and hasattr(e, 'stderr') and e.stderr:
+        logging.error(f"A command failed. Error details:\n---\n{e.stderr.decode().strip()}\n---")
+    else:
         logging.error(f"An error occurred: {e}")
+        
         if run_id:
             logging.info(f"Attempting to cancel run {run_id}...")
             subprocess.run(['gh', 'run', 'cancel', str(run_id), '--repo', repo])
