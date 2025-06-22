@@ -260,7 +260,8 @@ def setup_xray(client: ClientInfo, uuid: str) -> None:
         json.dump(xray_config, f, indent=2)
     
     logging.info("Xray configuration generated successfully.")
-    run_command(f"sudo xray run -c {final_config_path}")
+    xray_executable_path = BASE_DIR / "bin/xray"
+    run_command(f"sudo {xray_executable_path} run -c {final_config_path}")
     run_command("sleep 365d")
 def main() -> None:
     """Main entry point for the server manager script."""
