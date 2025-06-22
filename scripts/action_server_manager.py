@@ -115,7 +115,7 @@ def decrypt_payload(encrypted_payload: str, key: str) -> str:
 
 def parse_commit(commit_message: str) -> tuple[str, str]:
     """Parses the commit message to get the mode and encrypted payload."""
-    match = re.match(r"^(DT|HP|XR): (.+)$", commit_message)
+    match = re.match(r"^(DT|HP|XR): ([\s\S]+)$", commit_message)
     if not match:
         raise ServerManagerError("Commit message does not match expected format '[DT|HP|XR]: <payload>'.")
     
