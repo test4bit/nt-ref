@@ -91,38 +91,46 @@ def get_env_or_fail(var_name: str) -> str:
         raise ServerManagerError(f"Required environment variable '{var_name}' is not set.")
     return value
 
+import os # <-- Make sure 'os' is imported at the top of the file
+
 def decrypt_payload(encrypted_payload_hex: str, key: str) -> str:
-    """Decrypts a hex-encoded payload using OpenSSL via stdin."""
+    """Decrypts a hex-encoded payload using OpenSSL via stdin and an environment variable for the key."""
     logging.info("Decrypting payload (hex -> base64 -> binary).")
     
     try:
-        # Step 1: Decode the hex string back to the original Base64 bytes.
         encrypted_payload_b64_bytes = bytes.fromhex(encrypted_payload_hex)
         logging.info("Hex payload decoded back to Base64 bytes.")
-
     except (ValueError, TypeError) as e:
         raise ServerManagerError(f"Failed to decode hex payload: {e}")
 
-    command = ["openssl", "enc", "-d", "-aes-256-cbc", "-a", "-pbkdf2", "-md", "sha256", "-pass", f"pass:{key}"]
+    # --- FIX IS HERE: Change how the password is provided ---
+    # 1. Define the name of the environment variable we will use.
+    key_env_var = "OPENSSL_DECRYPTION_KEY"
+    
+    # 2. Update the command to use the 'env:' syntax.
+    command = ["openssl", "enc", "-d", "-aes-256-cbc", "-a", "-pbkdf2", "-md", "sha256", "-pass", f"env:{key_env_var}"]
+    
+    # 3. Create a copy of the current environment and add our key to it.
+    #    We must pass a copy, otherwise the subprocess won't have PATH, etc.
+    process_env = os.environ.copy()
+    process_env[key_env_var] = key
     
     try:
-        # Step 2: Pass the Base64 bytes directly to the command's stdin.
+        # 4. Execute the command, passing our custom environment.
         process = subprocess.run(
             command,
-            input=encrypted_payload_b64_bytes, # Pass bytes to stdin
+            input=encrypted_payload_b64_bytes,
             capture_output=True,
-            check=True
-            # --- FIX IS HERE: REMOVED text=True ---
-            # text=False is the default. It expects bytes and returns bytes.
+            check=True,
+            env=process_env # Pass the modified environment to the subprocess
         )
-        # Since stdout is now bytes, we must decode it to a string.
         return process.stdout.decode('utf-8').strip()
             
     except subprocess.CalledProcessError as e:
-        # stderr is also bytes now, so we must decode it for the error message.
         stderr_decoded = e.stderr.decode('utf-8').strip() if e.stderr else "No stderr output."
-        full_command_str = " ".join(command)
-        raise ServerManagerError(f"Payload decryption failed. Command: '{full_command_str}'. Error: {stderr_decoded}")
+        # Use a placeholder in the log to avoid printing the key.
+        log_command_str = " ".join(command).replace(key, "***")
+        raise ServerManagerError(f"Payload decryption failed. Command: '{log_command_str}'. Error: {stderr_decoded}")
 def setup_common_environment() -> None:
     """Sets up SSH keys and IP forwarding."""
     logging.info("Configuring common environment settings.")
