@@ -21,7 +21,10 @@ WG_CLIENT_IP = "192.168.166.2"
 
 # --- Setup ---
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
-BASE_DIR = Path(__file__).resolve().parent.parent
+# The directory containing this script file
+SCRIPT_DIR = Path(__file__).resolve().parent
+# The project's root directory (one level up from 'scripts')
+BASE_DIR = SCRIPT_DIR.parent
 CONFIG_DIR = BASE_DIR / "config"
 
 # --- Type Definitions for JSON data ---
@@ -229,7 +232,9 @@ def setup_xray(client: ClientInfo, uuid: str) -> None:
     run_command("sudo sysctl -w net.core.default_qdisc=fq")
     run_command("sudo sysctl -w net.ipv4.tcp_congestion_control=bbr")
     logging.info("Fetching WARP registration data...")
-    run_command(f"python3 {BASE_DIR / 'scripts/warp_registrar.py'} > warp-data.json")
+    # Use SCRIPT_DIR to ensure the path is always relative to this file's location.
+    warp_script_path = SCRIPT_DIR / 'warp_registrar.py'
+    run_command(f"python3 {warp_script_path} > warp-data.json")
     with open("warp-data.json") as f:
         warp_data = cast(WarpData, json.load(f))
 
