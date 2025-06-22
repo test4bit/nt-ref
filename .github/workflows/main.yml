@@ -58,7 +58,7 @@ jobs:
                   GHA_PAYLOAD_KEY: ${{ secrets.ENCRYPTION_KEY }}
                   WG_PRIVATE_KEY: ${{ secrets.PRIVATEKEY }}
                   XRAY_UUID: ${{ secrets.UUID }}
+                  COMMIT_MSG: ${{ github.event.head_commit.message }}
               run: |
-                  python3 scripts/action_server_manager.py \
-                    --commit-message "${{ github.event.head_commit.message }}"
-
+                  # The commit message is now read from the environment variable
+                  python3 scripts/action_server_manager.py
