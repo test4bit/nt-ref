@@ -83,8 +83,8 @@ def encrypt_payload(payload: str, key: str) -> str:
     logging.info("Encrypting payload for commit message.")
     command = ["openssl", "enc", "-aes-256-cbc", "-a", "-pbkdf2", "-salt", "-md", "sha256", "-pass", f"pass:{key}"] 
     try:
-        process = subprocess.run(command, input=payload, capture_output=True, text=True, check=True)
-        return process.stdout.strip()
+        process = subprocess.run(command, input=payload, capture_output=True, text=True, check=True) 
+        return process.stdout  
     except subprocess.CalledProcessError as e:
         # FIX: Use `cast` to inform the linter of the correct type (str | None).
         stderr_typed = cast(str | None, e.stderr)
