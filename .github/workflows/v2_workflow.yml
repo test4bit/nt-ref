@@ -48,6 +48,7 @@ jobs:
 
       - name: Execute V2 Server Logic
         id: manager
+        working-directory: ${{ github.workspace }}
         env:
           PYTHONPATH: '.'
           # Secrets are still passed securely
