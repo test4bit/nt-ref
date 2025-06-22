@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import json
 import logging
 import os
 import re
@@ -27,8 +28,15 @@ def check_dependencies(*cmds: str) -> None:
         if subprocess.run(['which', cmd], capture_output=True).returncode != 0:
             raise ClientError(f"Required command '{cmd}' not found. Please install it and ensure it's in your PATH.")
 
+def get_env_or_fail(var_name: str) -> str:
+    """Gets an environment variable or raises a specific error if not found."""
+    value = os.getenv(var_name)
+    if not value:
+        raise ClientError(f"Required environment variable '{var_name}' is not set.")
+    return value
+
 def get_public_ip() -> str:
-    """Fetches the public IP address."""
+    # This function remains the same
     logging.info("Fetching public IP address...")
     try:
         result = subprocess.run(
@@ -44,188 +52,128 @@ def get_public_ip() -> str:
         raise ClientError(f"Could not fetch public IP: {e}")
 
 def run_stun_client(local_port: int) -> tuple[str, str]:
-    """
-    Runs the STUN client to determine external IP and mapped port.
-    Returns (external_ip:port, nat_type).
-    """
+    # This function remains the same
     logging.info(f"Running STUN client on local port {local_port}...")
     stun_cmd = f"stun -v {STUN_SERVER} -p {local_port}"
-    
     try:
-        # We don't use 'check=True' because stun-client uses non-zero exit codes
-        # to report different NAT types, which we don't want to treat as a hard error.
-        result = subprocess.run(
-            shlex.split(stun_cmd),
-            capture_output=True, text=True, timeout=15
-        )
+        result = subprocess.run(shlex.split(stun_cmd), capture_output=True, text=True, timeout=15)
         output = result.stdout + result.stderr
-
-        # However, a very high exit code (like 127 for 'command not found') or
-        # completely empty output still indicates a true failure.
         if result.returncode > 10 or not output.strip():
-            raise ClientError(
-                f"STUN client execution failed in a critical way. "
-                f"Is 'stun-client' installed and in your PATH? Exit Code: {result.returncode}"
-            )
-
-    except FileNotFoundError:
-        # This catches the case where 'stun' command doesn't exist at all.
-        raise ClientError("STUN client command not found. Please install 'stun-client'.")
-    except subprocess.TimeoutExpired:
-        raise ClientError("STUN client timed out. Check your network connection and firewall.")
-
+            raise ClientError(f"STUN client execution failed. Is 'stun-client' installed? Exit Code: {result.returncode}")
+    except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+        raise ClientError(f"STUN client execution failed: {e}")
 
     mapped_addr_match = re.search(r"MappedAddress = (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d+)", output)
     nat_type_match = re.search(r"Primary: (.*)", output)
-
     if not mapped_addr_match or not nat_type_match:
-        logging.error(f"STUN Raw Output:\n{output}")
-        raise ClientError("Could not parse STUN client output. Your NAT might be too restrictive.")
-
+        raise ClientError(f"Could not parse STUN client output. Raw output:\n{output}")
     ipport = mapped_addr_match.group(1)
     nat_type = nat_type_match.group(1).strip()
-
     logging.info(f"STUN result: Mapped Address = {ipport}, NAT Type = {nat_type}")
-
-    if "Independent Mapping" not in nat_type:
-        raise ClientError(
-            (f"Incompatible NAT type: '{nat_type}'. "
-             "This method requires 'Independent Mapping' to function correctly.")
-        )
-
+    if "Independent Mapping" not in nat_type and "hole-punch" in sys.argv:
+        raise ClientError(f"Incompatible NAT type: '{nat_type}'.")
     return ipport, nat_type
 
 def encrypt_payload(payload: str, key: str) -> str:
-    """Encrypts a payload using OpenSSL and returns a hex-encoded Base64 string."""
-    logging.info("Encrypting payload for commit message.")
-    # Step 1: Encrypt to Base64 (this output has a newline, which is fine)
+    # This function remains the same
+    logging.info("Encrypting payload...")
     command = ["openssl", "enc", "-aes-256-cbc", "-a", "-pbkdf2", "-salt", "-md", "sha256", "-pass", f"pass:{key}"]
     try:
-        process = subprocess.run(command, input=payload, capture_output=True, text=True, check=True)
+        process = subprocess.run(command, input=payload.encode('utf-8'), capture_output=True, check=True)
         base64_payload = process.stdout
-        
-        # Step 2: Convert the Base64 string to a hex string. This is safe for git.
-        hex_payload = base64_payload.encode('utf-8').hex()
-        logging.info("Payload converted to hex for safe transport in git commit.")
-        return hex_payload
-
+        return base64_payload.hex()
     except subprocess.CalledProcessError as e:
-        stderr_typed = cast(str | None, e.stderr)
-        error_msg = stderr_typed.strip() if stderr_typed else ""
-        raise ClientError(f"Payload encryption failed. Is OpenSSL installed? Error: {error_msg}")
-        
-def git_commit_and_push(message: str) -> None:
-    """Creates an empty commit with the given message and pushes it."""
-    logging.info("Committing and pushing trigger to the repository...")
-    try:
-        _ = subprocess.run(["git", "commit", "-m", message, "--allow-empty"], check=True, capture_output=True, text=True)
-        _ = subprocess.run(["git", "push"], check=True, capture_output=True, text=True)
-        logging.info("Trigger commit pushed successfully.")
-    except subprocess.CalledProcessError as e:
-        _ = subprocess.run(["git", "reset", "HEAD~1"], capture_output=True)
-        # FIX: Use `cast` to inform the linter of the correct type (str | None).
-        stderr_typed = cast(str | None, e.stderr)
-        error_msg = stderr_typed.strip() if stderr_typed else ""
-        raise ClientError(f"Git operation failed: {error_msg}")
+        raise ClientError(f"Payload encryption failed: {e.stderr.decode().strip()}")
 
-def keep_nat_alive(local_port: int) -> None:
-    """Sends periodic UDP packets to keep a NAT mapping alive."""
-    logging.info("NAT does not preserve ports. Starting NAT keep-alive process.")
-    logging.info("Press CTRL+C to stop AFTER connecting to the VPN.")
-    while True:
-        try:
-            _ = subprocess.run(
-                ["nc", "-n", "-u", "-p", str(local_port), "3.3.3.3", "443"],
-                input=b'', timeout=5, capture_output=True
-            )
-            time.sleep(10)
-        except subprocess.TimeoutExpired:
-            continue
-        except FileNotFoundError:
-            raise ClientError("`nc` (netcat) is required for NAT keep-alive but was not found.")
-
-def cancel_github_runs() -> None:
-    """Cancels any in-progress GitHub Actions runs for this repository."""
-    logging.info("Cancelling in-progress GitHub Actions runs...")
-    try:
-        command = r"""
-        gh run list --json databaseId,status -q '.[] | select(.status == "in_progress" or .status == "queued" or .status == "waiting") | .databaseId' | xargs -r -n1 gh run cancel
-        """
-        _ = subprocess.run(command, shell=True, check=True, capture_output=True, text=True)
-        logging.info("Cleanup command sent.")
-    except subprocess.CalledProcessError as e:
-        # FIX: Use `cast` to inform the linter of the correct type (str | None).
-        stderr_typed = cast(str | None, e.stderr)
-        error_msg = stderr_typed.strip() if stderr_typed else ""
-        logging.warning(f"Failed to cancel GitHub runs. You may need to do this manually. Error: {error_msg}")
-
-def main_loop(mode: str, encryption_key: str) -> None:
-    """The main execution loop that triggers the GitHub Action."""
-    while True:
-        try:
-            payload = ""
-            nat_type = ""
-            local_port = 0
-
-            if mode == "hole-punch":
-                check_dependencies("stun", "nc")
-                local_port = 20000 + (os.getpid() % 10000)
-                ipport, nat_type = run_stun_client(local_port)
-                payload = f"{ipport}:{local_port}"
-                commit_prefix = "HP"
-            else:
-                ip = get_public_ip()
-                payload = f"{ip}:443"
-                commit_prefix = "DT" if mode == "direct-connect" else "XR"
-
-            encrypted_payload = encrypt_payload(payload, encryption_key)
-            commit_message = f"{commit_prefix}: {encrypted_payload}"
-
-            git_commit_and_push(commit_message)
-
-            if mode == "hole-punch" and "preserves ports" not in nat_type:
-                keep_nat_alive(local_port)
-            else:
-                logging.info("Trigger sent. The GitHub Action is starting.")
-                logging.info("This script will re-trigger every 6 hours. Press Ctrl+C to exit.")
-                time.sleep(6 * 3600)
-
-        except ClientError as e:
-            logging.error(f"An error occurred: {e}")
-            logging.error("Exiting.")
-            sys.exit(1)
-        except KeyboardInterrupt:
-            logging.info("Ctrl+C detected.")
-            cancel_github_runs()
-            logging.info("Exiting gracefully.")
-            sys.exit(0)
-        except Exception as e:
-            logging.error(f"An unexpected error occurred: {e}", exc_info=True)
-            sys.exit(1)
-
-
-if __name__ == "__main__":
+def main():
+    """Main entry point for the V2 client."""
+    # Add 'gh' to dependency checks
     check_dependencies("git", "gh", "openssl", "curl")
 
-    parser = argparse.ArgumentParser(
-        description="Client-side trigger for GitHub Actions NAT traversal.",
-        formatter_class=argparse.RawTextHelpFormatter
-    )
-    _ = parser.add_argument(
-        "mode",
-        choices=["direct-connect", "hole-punch", "xray"],
-        help="""The operational mode:
-- direct-connect: For WireGuard direct connection.
-- hole-punch:     For WireGuard with NAT hole punching.
-- xray:           For Xray server."""
-    )
-
+    parser = argparse.ArgumentParser(description="V2 Client for GitHub Actions NAT traversal.")
+    parser.add_argument("mode", choices=["direct-connect", "hole-punch", "xray"], help="The operational mode.")
+    parser.add_argument("--repo", help="The GitHub repository in 'owner/repo' format. Defaults to GH_REPO env var.")
+    parser.add_argument("--workflow", default="nat_traversal.yml", help="The name of the workflow file.")
     args = parser.parse_args()
-    mode = cast(str, args.mode)
+    
+    # Use --repo flag or fall back to environment variable for convenience
+    repo = args.repo or get_env_or_fail("GH_REPO")
 
-    encryption_key = os.getenv(ENCRYPTION_KEY_ENV_VAR)
-    if not encryption_key:
-        logging.error(f"Encryption key not found. Please set the '{ENCRYPTION_KEY_ENV_VAR}' environment variable.")
+    run_id = None
+    try:
+        # Get secrets from environment
+        encryption_key = get_env_or_fail(ENCRYPTION_KEY_ENV_VAR)
+        # GITHUB_TOKEN is read automatically by the 'gh' CLI
+        _ = get_env_or_fail("GITHUB_TOKEN")
+
+        # 1. Gather Info
+        logging.info(f"Preparing to trigger workflow in '{args.mode}' mode.")
+        payload_str = ""
+        local_port = 0
+        if args.mode == "hole-punch":
+            check_dependencies("stun", "nc")
+            local_port = 20000 + (os.getpid() % 10000)
+            ipport, _ = run_stun_client(local_port)
+            payload_str = f"{ipport}:{local_port}"
+        else:
+            ip = get_public_ip()
+            payload_str = f"{ip}:443"
+
+        # 2. Encrypt the payload
+        encrypted_payload_hex = encrypt_payload(payload_str, encryption_key)
+
+        # 3. Trigger the workflow using 'gh workflow run'
+        logging.info("Triggering workflow via 'gh'...")
+        trigger_command = [
+            'gh', 'workflow', 'run', args.workflow,
+            '--repo', repo,
+            '--field', f'mode={args.mode}',
+            '--field', f'client_info_payload={encrypted_payload_hex}',
+            '--ref', 'main'
+        ]
+        subprocess.run(trigger_command, check=True, capture_output=True)
+        logging.info("Workflow triggered successfully.")
+
+        # 4. Find the Run ID
+        logging.info("Waiting for the new run to appear...")
+        time.sleep(5) # Give GitHub a moment to create the run
+        for _ in range(5):
+            try:
+                run_list_json = subprocess.run(
+                    ['gh', 'run', 'list', '--workflow', args.workflow, '--repo', repo, '--limit=1', '--json', 'databaseId'],
+                    capture_output=True, text=True, check=True
+                ).stdout
+                run_id = json.loads(run_list_json)[0]['databaseId']
+                logging.info(f"Detected new run with ID: {run_id}")
+                break
+            except (IndexError, json.JSONDecodeError):
+                time.sleep(3)
+        if not run_id:
+            raise ClientError("Could not find the triggered workflow run.")
+
+        # 5. Watch the run and stream logs
+        logging.info(f"Watching run {run_id}. Streaming logs... (Press Ctrl+C to cancel)")
+        watch_process = subprocess.run(['gh', 'run', 'watch', str(run_id), '--repo', repo], check=True)
+
+        if watch_process.returncode == 0:
+            logging.info("Workflow completed successfully!")
+            # Future improvement: Add artifact download here if needed.
+        else:
+            raise ClientError(f"Workflow run {run_id} failed or was cancelled.")
+
+    except (ClientError, subprocess.CalledProcessError) as e:
+        logging.error(f"An error occurred: {e}")
+        if run_id:
+            logging.info(f"Attempting to cancel run {run_id}...")
+            subprocess.run(['gh', 'run', 'cancel', str(run_id), '--repo', repo])
         sys.exit(1)
+    except KeyboardInterrupt:
+        logging.info("\nCtrl+C detected.")
+        if run_id:
+            logging.info(f"Attempting to cancel run {run_id}...")
+            subprocess.run(['gh', 'run', 'cancel', str(run_id), '--repo', repo])
+        logging.info("Exiting gracefully.")
+        sys.exit(0)
 
-    main_loop(mode, encryption_key)
+if __name__ == "__main__":
+    main()
