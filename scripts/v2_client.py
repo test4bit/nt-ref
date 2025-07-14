@@ -79,7 +79,6 @@ def main() -> None:
     mode = cast(str, args.mode)
     repo_arg: str | None = cast(str | None, args.repo)
 
-    # FIX: Initialize variables to None before the try block.
     run_id: int | None = None
     repo: str | None = None
 
@@ -88,59 +87,68 @@ def main() -> None:
         repo = repo_arg or get_env_or_fail("GH_REPO")
         _ = get_env_or_fail("GITHUB_TOKEN")
 
-        logging.info(f"Preparing to trigger V2 workflow in '{mode}' mode.")
-        payload_str = ""
-        if mode == "hole-punch":
-            check_dependencies("stun", "nc")
-            local_port = 20000 + (os.getpid() % 10000)
-            ipport, _ = run_stun_client(local_port)
-            payload_str = f"{ipport}:{local_port}"
-        else:
-            ip = get_public_ip()
-            payload_str = f"{ip}:443"
+        while True:
+            try:
+                logging.info(f"Preparing to trigger V2 workflow in '{mode}' mode.")
+                payload_str = ""
+                if mode == "hole-punch":
+                    check_dependencies("stun", "nc")
+                    local_port = 20000 + (os.getpid() % 10000)
+                    ipport, _ = run_stun_client(local_port)
+                    payload_str = f"{ipport}:{local_port}"
+                else:
+                    ip = get_public_ip()
+                    payload_str = f"{ip}:443"
 
-        encrypted_payload = encrypt_payload(payload_str, encryption_key)
-        client_info_json = json.dumps({"payload_b64": encrypted_payload})
+                encrypted_payload = encrypt_payload(payload_str, encryption_key)
+                client_info_json = json.dumps({"payload_b64": encrypted_payload})
 
-        logging.info("Triggering V2 workflow via 'gh'...")
-        trigger_command = [
-            'gh', 'workflow', 'run', 'v2_workflow.yml',
-            '--repo', repo,
-            '--field', f'mode={mode}',
-            '--field', f'client_info_json={client_info_json}',
-            '--ref', 'main'
-        ]
-        _ = subprocess.run(trigger_command, check=True, capture_output=True)
-        logging.info("Workflow triggered successfully.")
+                logging.info("Triggering V2 workflow via 'gh'...")
+                trigger_command = [
+                    'gh', 'workflow', 'run', 'v2_workflow.yml',
+                    '--repo', repo,
+                    '--field', f'mode={mode}',
+                    '--field', f'client_info_json={client_info_json}',
+                    '--ref', 'main'
+                ]
+                _ = subprocess.run(trigger_command, check=True, capture_output=True)
+                logging.info("Workflow triggered successfully.")
 
-        logging.info("Waiting 5 seconds for the new run to appear...")
-        time.sleep(5)
-        try:
-            logging.info("Attempting to find the run ID (single attempt)...")
-            run_list_json_str = subprocess.run(
-                ['gh', 'run', 'list', '--workflow=v2_workflow.yml', '--repo', repo, '--limit=1', '--json', 'databaseId'],
-                capture_output=True, text=True, check=True
-            ).stdout
-            run_list = cast(list[dict[str, int]], json.loads(run_list_json_str))
-            if run_list:
-                run_id = run_list[0]['databaseId']
-                logging.info(f"Detected new run with ID: {run_id}")
-        except (IndexError, json.JSONDecodeError, subprocess.CalledProcessError) as e:
-            logging.warning(f"Could not immediately find run ID, but workflow was triggered. Error: {e}")
+                logging.info("Waiting 5 seconds for the new run to appear...")
+                time.sleep(5)
+                try:
+                    logging.info("Attempting to find the run ID (single attempt)...")
+                    run_list_json_str = subprocess.run(
+                        ['gh', 'run', 'list', '--workflow=v2_workflow.yml', '--repo', repo, '--limit=1', '--json', 'databaseId'],
+                        capture_output=True, text=True, check=True
+                    ).stdout
+                    run_list = cast(list[dict[str, int]], json.loads(run_list_json_str))
+                    if run_list:
+                        run_id = run_list[0]['databaseId']
+                        logging.info(f"Detected new run with ID: {run_id}")
+                except (IndexError, json.JSONDecodeError, subprocess.CalledProcessError) as e:
+                    logging.warning(f"Could not immediately find run ID, but workflow was triggered. Error: {e}")
 
-        if not run_id:
-            raise AppError("Could not find the triggered workflow run on the first attempt.")
+                if not run_id:
+                    raise AppError("Could not find the triggered workflow run on the first attempt.")
 
-        logging.info(f"Workflow run {run_id} is active on GitHub.")
-        _ = input("Press ENTER to exit this script (the workflow will continue), or press Ctrl+C to cancel the workflow run.\n")
-        logging.info("Exiting script. The workflow will continue to run on GitHub.")
+                logging.info(f"Workflow run {run_id} is active on GitHub.")
+                
+                # Wait for 6 hours before the next run
+                wait_duration = 6 * 3600
+                logging.info(f"Waiting for {wait_duration / 3600} hours before next trigger. Press Ctrl+C to cancel the current run and exit.")
+                time.sleep(wait_duration)
 
-    except (AppError, subprocess.CalledProcessError) as e:
-        logging.error(f"An error occurred: {e}")
-        if run_id and repo:
-            logging.info(f"Attempting to cancel run {run_id}...")
-            _ = subprocess.run(['gh', 'run', 'cancel', str(run_id), '--repo', repo])
-        sys.exit(1)
+            except (AppError, subprocess.CalledProcessError) as e:
+                logging.error(f"An error occurred: {e}")
+                if run_id and repo:
+                    logging.info(f"Attempting to cancel run {run_id}...")
+                    _ = subprocess.run(['gh', 'run', 'cancel', str(run_id), '--repo', repo])
+                
+                logging.info("Retrying after a 60-second delay due to error...")
+                time.sleep(60)
+
+
     except KeyboardInterrupt:
         logging.info("\nCtrl+C detected.")
         if run_id and repo:
