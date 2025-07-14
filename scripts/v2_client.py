@@ -11,6 +11,9 @@ import time
 from pathlib import Path
 from typing import cast
 
+# Third-party libraries - install with "pip install requests"
+import requests
+
 # This line is crucial for running the script directly.
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
@@ -24,21 +27,32 @@ logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
 ENCRYPTION_KEY_ENV_VAR = "GHA_PAYLOAD_KEY"
 STUN_SERVER = "stun.l.google.com:19302"
 
+
 def get_public_ip() -> str:
-    """Fetches the public IP address."""
-    logging.info("Fetching public IP address...")
+    """
+    Fetches the public IP from Cloudflare's diagnostic endpoint.
+    This is fast, reliable, and blends in with infrastructure traffic.
+    """
+    logging.info("Fetching public IP from Cloudflare trace...")
     try:
-        result = subprocess.run(
-            ['curl', '-s', 'https://icanhazip.com'],
-            capture_output=True, text=True, check=True, timeout=10
-        )
-        ip = result.stdout.strip()
+        response = requests.get("https://www.cloudflare.com/cdn-cgi/trace", timeout=10)
+        response.raise_for_status()  # Raise an exception for bad status codes
+
+        # The response is key-value text. We need the value from the 'ip=' line.
+        ip_match = re.search(r'^ip=(.+)$', response.text, re.MULTILINE)
+
+        if not ip_match:
+            raise AppError("Could not parse IP from Cloudflare trace response.")
+
+        ip = ip_match.group(1).strip()
         if not ip:
-            raise AppError("Failed to get a valid public IP address.")
+            raise AppError("Failed to get a valid public IP address from Cloudflare.")
+
         logging.info(f"Detected public IP: {ip}")
         return ip
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
-        raise AppError(f"Could not fetch public IP: {e}")
+    except (requests.exceptions.RequestException, IndexError) as e:
+        raise AppError(f"Could not fetch public IP from Cloudflare: {e}")
+
 
 def run_stun_client(local_port: int) -> tuple[str, str]:
     """Runs the STUN client to determine external IP and mapped port."""
@@ -61,9 +75,10 @@ def run_stun_client(local_port: int) -> tuple[str, str]:
         raise AppError(f"Incompatible NAT type: '{nat_type}'.")
     return ipport, nat_type
 
+
 def main() -> None:
     """Main entry point for the V2 client."""
-    check_dependencies("git", "gh", "curl")
+    check_dependencies("git", "gh", "requests")
 
     parser = argparse.ArgumentParser(description="V2 Client for GitHub Actions NAT traversal.")
     _ = parser.add_argument(
@@ -133,18 +148,18 @@ def main() -> None:
                     raise AppError("Could not find the triggered workflow run on the first attempt.")
 
                 logging.info(f"Workflow run {run_id} is active on GitHub.")
-                
+
                 # Wait for 6 hours before the next run
                 wait_duration = 6 * 3600
-                logging.info(f"Waiting for {wait_duration / 3600} hours before next trigger. Press Ctrl+C to cancel the current run and exit.")
+                logging.info(f"Waiting for {wait_duration / 3600:.1f} hours before next trigger. Press Ctrl+C to cancel the current run and exit.")
                 time.sleep(wait_duration)
 
             except (AppError, subprocess.CalledProcessError) as e:
-                logging.error(f"An error occurred: {e}")
+                logging.error(f"An error occurred during the loop: {e}")
                 if run_id and repo:
                     logging.info(f"Attempting to cancel run {run_id}...")
                     _ = subprocess.run(['gh', 'run', 'cancel', str(run_id), '--repo', repo])
-                
+
                 logging.info("Retrying after a 60-second delay due to error...")
                 time.sleep(60)
 
