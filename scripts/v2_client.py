@@ -132,20 +132,17 @@ def main() -> None:
             raise AppError("Could not find the triggered workflow run on the first attempt.")
 
         logging.info(f"Workflow run {run_id} is active on GitHub.")
-        logging.info("You can download artifacts (e.g., wg_user.conf) manually from the GitHub UI when the run completes.")
         _ = input("Press ENTER to exit this script (the workflow will continue), or press Ctrl+C to cancel the workflow run.\n")
         logging.info("Exiting script. The workflow will continue to run on GitHub.")
 
     except (AppError, subprocess.CalledProcessError) as e:
         logging.error(f"An error occurred: {e}")
-        # FIX: Check that both run_id and repo have been successfully assigned.
         if run_id and repo:
             logging.info(f"Attempting to cancel run {run_id}...")
             _ = subprocess.run(['gh', 'run', 'cancel', str(run_id), '--repo', repo])
         sys.exit(1)
     except KeyboardInterrupt:
         logging.info("\nCtrl+C detected.")
-        # FIX: Check that both run_id and repo have been successfully assigned.
         if run_id and repo:
             logging.info(f"Attempting to cancel run {run_id}...")
             _ = subprocess.run(['gh', 'run', 'cancel', str(run_id), '--repo', repo])
