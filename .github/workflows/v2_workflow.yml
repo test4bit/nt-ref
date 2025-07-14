@@ -45,7 +45,7 @@ jobs:
 
                   echo "Setting executable permissions..."
                   chmod +x bin/* scripts/*.py
-
+                  
             - name: Execute V2 Server Logic
               id: manager
               working-directory: ${{ github.workspace }}
@@ -60,4 +60,13 @@ jobs:
                   INPUT_MODE: ${{ inputs.mode }}
                   INPUT_CLIENT_INFO_JSON: ${{ inputs.client_info_json }}
               run: |
-                  sudo python3 scripts/v2_server_manager.py
+                  # Explicitly pass environment variables to sudo
+                  sudo env \
+                    GHA_PAYLOAD_KEY="${{ secrets.ENCRYPTION_KEY }}" \
+                    WG_PRIVATE_KEY="${{ secrets.PRIVATEKEY }}" \
+                    XRAY_UUID="${{ secrets.UUID }}" \
+                    INPUT_MODE="${{ inputs.mode }}" \
+                    INPUT_CLIENT_INFO_JSON="${{ inputs.client_info_json }}" \
+                    PYTHONPATH="." \
+                    python3 scripts/v2_server_manager.py
+          
