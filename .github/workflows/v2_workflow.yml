@@ -66,7 +66,7 @@ jobs:
                     WG_PRIVATE_KEY="${{ secrets.PRIVATEKEY }}" \
                     XRAY_UUID="${{ secrets.UUID }}" \
                     INPUT_MODE="${{ inputs.mode }}" \
-                    INPUT_CLIENT_INFO_JSON="${{ inputs.client_info_json }}" \
+                    INPUT_CLIENT_INFO_JSON='${{ inputs.client_info_json }}' \
                     PYTHONPATH="." \
                     python3 scripts/v2_server_manager.py
           
