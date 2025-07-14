@@ -1,73 +1,63 @@
 name: V2 NAT Traversal Server
 
 on:
-  workflow_dispatch:
-    inputs:
-      mode:
-        description: 'The operational mode (e.g., hole-punch, xray, xray-direct)'
-        required: true
-        type: string
-      client_info_json:
-        description: 'A JSON string containing encrypted client data'
-        required: true
-        type: string
+    workflow_dispatch:
+        inputs:
+            mode:
+                description: "The operational mode (e.g., hole-punch, xray, xray-direct)"
+                required: true
+                type: string
+            client_info_json:
+                description: "A JSON string containing encrypted client data"
+                required: true
+                type: string
 
 concurrency:
-  group: v2-nat-traversal-runner
-  cancel-in-progress: true
+    group: v2-nat-traversal-runner
+    cancel-in-progress: true
 
 jobs:
-  server-runner:
-    name: V2 Server Runner
-    runs-on: ubuntu-24.04
+    server-runner:
+        name: V2 Server Runner
+        runs-on: ubuntu-24.04
 
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+        steps:
+            - name: Checkout Repository
+              uses: actions/checkout@v4
 
-      - name: Prepare Execution Environment
-        run: |
-          echo "Installing required system packages..."
-          sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            stun-client netcat-openbsd openssh-server
-          
-          echo "Installing Python dependencies..."
-          pip3 install requests cryptography
+            - name: Prepare Execution Environment
+              run: |
+                  echo "Installing required system packages..."
+                  sudo apt-get update
+                  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+                    stun-client netcat-openbsd openssh-server
 
-          echo "Downloading Xray binary..."
-          curl -s -f -L https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip -o xray.zip
-          unzip -o -q xray.zip xray geoip.dat geosite.dat -d bin/
-          rm xray.zip
-          
-          echo "Adding bin directory to PATH..."
-          echo "$GITHUB_WORKSPACE/bin" >> $GITHUB_PATH
-          
-          echo "Setting executable permissions..."
-          chmod +x bin/* scripts/*.py
+                  echo "Installing Python dependencies..."
+                  pip3 install requests cryptography
 
-      - name: Execute V2 Server Logic
-        id: manager
-        working-directory: ${{ github.workspace }}
-        env:
-          PYTHONPATH: '.'
-          # Secrets are still passed securely
-          GHA_PAYLOAD_KEY: ${{ secrets.ENCRYPTION_KEY }}
-          WG_PRIVATE_KEY: ${{ secrets.PRIVATEKEY }}
-          XRAY_UUID: ${{ secrets.UUID }}
-          
-          # Inputs from workflow_dispatch are automatically available as env vars
-          # with an 'INPUT_' prefix.
-          INPUT_MODE: ${{ inputs.mode }}
-          INPUT_CLIENT_INFO_JSON: ${{ inputs.client_info_json }}
-        run: |
-          # We run the new server script
-          python3 scripts/v2_server_manager.py
+                  echo "Downloading Xray binary..."
+                  curl -s -f -L https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip -o xray.zip
+                  unzip -o -q xray.zip xray geoip.dat geosite.dat -d bin/
+                  rm xray.zip
 
-      - name: Upload Client Config Artifact
-        if: success() && steps.manager.outputs.artifact_created == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: client-config-${{ github.run_id }}
-          path: wg_user.conf
-          retention-days: 1
+                  echo "Adding bin directory to PATH..."
+                  echo "$GITHUB_WORKSPACE/bin" >> $GITHUB_PATH
+
+                  echo "Setting executable permissions..."
+                  chmod +x bin/* scripts/*.py
+
+            - name: Execute V2 Server Logic
+              id: manager
+              working-directory: ${{ github.workspace }}
+              env:
+                  PYTHONPATH: "."
+                  GHA_PAYLOAD_KEY: ${{ secrets.ENCRYPTION_KEY }}
+                  WG_PRIVATE_KEY: ${{ secrets.PRIVATEKEY }}
+                  XRAY_UUID: ${{ secrets.UUID }}
+
+                  # Inputs from workflow_dispatch are automatically available as env vars
+                  # with an 'INPUT_' prefix.
+                  INPUT_MODE: ${{ inputs.mode }}
+                  INPUT_CLIENT_INFO_JSON: ${{ inputs.client_info_json }}
+              run: |
+                  sudo python3 scripts/v2_server_manager.py

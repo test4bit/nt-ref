@@ -2,15 +2,40 @@
 import base64
 import logging
 from datetime import datetime, timezone
-from typing import cast
+from typing import TypedDict, cast
 
 import requests
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import x25519
 from requests import Session
 
-from ..models import WarpConfig
+# Correctly import from the shared models and exceptions modules
 from ..common.exceptions import AppError
+from ..common.models import WarpConfig
+
+# --- Type Definitions for the raw API response ---
+# By defining these, we make the parsing code type-safe and clear.
+class _WarpApiPeerEndpoint(TypedDict):
+    v4: str
+
+class _WarpApiPeer(TypedDict):
+    public_key: str
+    endpoint: _WarpApiPeerEndpoint
+
+class _WarpApiInterfaceAddresses(TypedDict):
+    v4: str
+
+class _WarpApiInterface(TypedDict):
+    addresses: _WarpApiInterfaceAddresses
+
+class _WarpApiConfig(TypedDict):
+    client_id: str
+    peers: list[_WarpApiPeer]
+    interface: _WarpApiInterface
+
+class _WarpApiResponse(TypedDict):
+    config: _WarpApiConfig
+
 
 class WarpApiClient:
     """Manages registration and configuration fetching for Cloudflare WARP."""
@@ -29,14 +54,14 @@ class WarpApiClient:
         })
 
     def _generate_keys(self) -> tuple[str, str]:
-        private_key = x25519.X25519PrivateKey.generate()
-        public_key = private_key.public_key()
-        private_bytes = private_key.private_bytes(
+        private_key_obj = x25519.X25519PrivateKey.generate()
+        public_key_obj = private_key_obj.public_key()
+        private_bytes = private_key_obj.private_bytes(
             encoding=serialization.Encoding.Raw,
             format=serialization.PrivateFormat.Raw,
             encryption_algorithm=serialization.NoEncryption(),
         )
-        public_bytes = public_key.public_bytes(
+        public_bytes = public_key_obj.public_bytes(
             encoding=serialization.Encoding.Raw,
             format=serialization.PublicFormat.Raw,
         )
@@ -45,19 +70,22 @@ class WarpApiClient:
             base64.b64encode(public_bytes).decode("utf-8"),
         )
 
-    def _register_api_account(self, public_key: str) -> dict:
+    def _register_api_account(self, public_key: str) -> _WarpApiResponse:
         timestamp = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-        payload = {"key": public_key, "tos": timestamp, "type": "Android"}
+        payload: dict[str, str] = {"key": public_key, "tos": timestamp, "type": "Android"}
+
         try:
             response = self._session.post(self.API_URL, json=payload, timeout=30)
             response.raise_for_status()
             logging.info("Successfully received WARP API response.")
-            return cast(dict, response.json())
+            # Cast the JSON response to our specific TypedDict for safety
+            return cast(_WarpApiResponse, response.json())
         except requests.exceptions.RequestException as e:
             error_body = e.response.text if e.response else "No response body"
             raise AppError(f"WARP API request failed: {e}. Body: {error_body}")
 
     def register_and_get_config(self) -> WarpConfig:
+        """High-level function to register and fetch a WARP configuration."""
         private_key, public_key = self._generate_keys()
         api_data = self._register_api_account(public_key)
 
@@ -68,6 +96,7 @@ class WarpApiClient:
             reserved_bytes = base64.b64decode(reserved_str)
             interface_addrs = api_data["config"]["interface"]["addresses"]
 
+            # Return the clean, shared WarpConfig dataclass from our models
             return WarpConfig(
                 endpoint_v4=peer["endpoint"]["v4"],
                 private_key=private_key,
@@ -78,8 +107,9 @@ class WarpApiClient:
         except (KeyError, IndexError) as e:
             raise AppError(f"Failed to parse WARP API response due to missing data: {e}")
 
+
 def get_warp_config() -> WarpConfig:
-    """High-level function to register and fetch a WARP configuration."""
+    """High-level factory function to get a WARP configuration."""
     logging.info("Fetching new WARP registration data...")
     client = WarpApiClient()
     return client.register_and_get_config()

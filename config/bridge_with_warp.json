@@ -17,11 +17,11 @@
       "settings": {
         "vnext": [
           {
-            "address": "192.168.1.35",
+            "address": "__CLIENT_IP_PLACEHOLDER__",
             "port": 443,
             "users": [
               {
-                "id": "UUID",
+                "id": "__XRAY_UUID_PLACEHOLDER__",
                 "encryption": "none",
                 "flow": "xtls-rprx-vision"
               }
@@ -45,12 +45,12 @@
     {
       "protocol": "wireguard",
       "settings": {
-        "secretKey": "PRIVATE",
-        "address": ["172.16.0.2/32", "2606:4700:110:8949:fed8:2642:a640:c8e1/128"],
+        "secretKey": "__WG_PRIVATE_KEY_PLACEHOLDER__",
+        "address": ["__WG_ADDRESS_V4_PLACEHOLDER__"],
         "peers": [
           {
-            "publicKey": "PUBLIC",
-            "endpoint": "engage.cloudflareclient.com:2408",
+            "publicKey": "__WG_PEER_PUBLIC_KEY_PLACEHOLDER__",
+            "endpoint": "__WG_PEER_ENDPOINT_PLACEHOLDER__",
             "keepAlive": 14
           }
         ]

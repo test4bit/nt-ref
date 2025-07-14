@@ -1,32 +1,48 @@
-# gh_runner_service/crypto.py
-import subprocess
-import tempfile
+# gh_runner_service/common/crypto.py
+import base64
+import os
 
-from .common.exceptions import AppError
-from .common.utils import run_command
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.exceptions import InvalidTag
 
-def decrypt_payload(encrypted_payload_hex: str, key: str) -> str:
-    """Decrypts a hex-encoded payload using OpenSSL via a temporary file."""
+from .exceptions import AppError
+
+SALT = b'gha-nat-traversal-salt'
+ITERATIONS = 480_000
+
+def _derive_key(master_key_hex: str) -> bytes:
+    master_key = bytes.fromhex(master_key_hex)
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=SALT,
+        iterations=ITERATIONS,
+    )
+    return kdf.derive(master_key)
+
+def encrypt_payload(payload: str, master_key_hex: str) -> str:
     try:
-        encrypted_payload_b64 = bytes.fromhex(encrypted_payload_hex).decode('utf-8')
-    except (ValueError, TypeError) as e:
-        raise AppError(f"Failed to decode hex payload: {e}")
+        encryption_key = _derive_key(master_key_hex)
+        payload_bytes = payload.encode('utf-8')
+        nonce = os.urandom(12)
+        aesgcm = AESGCM(encryption_key)
+        ciphertext = aesgcm.encrypt(nonce, payload_bytes, None)
+        return base64.b64encode(nonce + ciphertext).decode('utf-8')
+    except Exception as e:
+        raise AppError(f"Pure Python encryption failed: {e}")
 
-    command = ["openssl", "enc", "-d", "-aes-256-cbc", "-a", "-pbkdf2", "-md", "sha256", "-pass", f"pass:{key}"]
-    
-    with tempfile.NamedTemporaryFile(mode='w', delete=True, suffix=".txt", encoding='utf-8') as tmp:
-        tmp.write(encrypted_payload_b64)
-        tmp.flush()
-        command_with_file = command + ["-in", tmp.name]
-        process = run_command(" ".join(command_with_file))
-        return process.stdout.strip()
-
-def encrypt_payload(payload: str, key: str) -> str:
-    """Encrypts a payload using OpenSSL and returns a hex-encoded Base64 string."""
-    command = ["openssl", "enc", "-aes-256-cbc", "-a", "-pbkdf2", "-salt", "-md", "sha256", "-pass", f"pass:{key}"]
+def decrypt_payload(encrypted_payload_b64: str, master_key_hex: str) -> str:
     try:
-        process = subprocess.run(command, input=payload, capture_output=True, text=True, check=True)
-        base64_payload = process.stdout
-        return base64_payload.encode('utf-8').hex()
-    except subprocess.CalledProcessError as e:
-        raise AppError(f"Payload encryption failed: {e.stderr.strip()}")
+        encryption_key = _derive_key(master_key_hex)
+        encrypted_payload = base64.b64decode(encrypted_payload_b64)
+        nonce = encrypted_payload[:12]
+        ciphertext = encrypted_payload[12:]
+        aesgcm = AESGCM(encryption_key)
+        decrypted_bytes = aesgcm.decrypt(nonce, ciphertext, None)
+        return decrypted_bytes.decode('utf-8')
+    except InvalidTag:
+        raise AppError("Decryption failed: Invalid authentication tag. The key may be incorrect or the payload corrupted.")
+    except Exception as e:
+        raise AppError(f"Pure Python decryption failed: {e}")

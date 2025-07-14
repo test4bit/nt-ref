@@ -1,22 +1,23 @@
 #!/usr/bin/env python3
 import json
 import logging
-import os
-import sys
+import sys # 'os' is no longer needed here
 from pathlib import Path
 from typing import cast
 
-
-from pathlib import Path
+# This line is crucial for running the script directly.
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
+from gh_runner_service.common.crypto import decrypt_payload
 from gh_runner_service.common.exceptions import AppError
+from gh_runner_service.common.models import ClientInfo
 from gh_runner_service.common.utils import get_env_or_fail
-from gh_runner_service.models import ClientInfo
-from gh_runner_service.crypto import decrypt_payload
-from gh_runner_service.services import wireguard, xray_warp, xray_direct
-# We also need to import the base setup function
-from gh_runner_service.services import base_setup
+from gh_runner_service.services import (
+    base_setup,
+    wireguard,
+    xray_direct,
+    xray_warp,
+)
 
 # --- Setup ---
 LOG_FORMAT = "%(asctime)s - %(levelname)s - %(message)s"
@@ -31,20 +32,18 @@ def main() -> None:
     try:
         logging.info("--- V2 Workflow Started ---")
 
-        # Step 1: Get config from environment variables and workflow inputs
+        # Step 1: Get config from environment variables
         encryption_key = get_env_or_fail("GHA_PAYLOAD_KEY")
-        wg_private_key = os.getenv("WG_PRIVATE_KEY")
-        xray_uuid = os.getenv("XRAY_UUID")
-        
         mode = get_env_or_fail("INPUT_MODE")
         client_info_json = get_env_or_fail("INPUT_CLIENT_INFO_JSON")
-        
+
         logging.info(f"Mode received: {mode}")
 
         # Step 2: Decrypt payload
-        encrypted_payload = json.loads(client_info_json)["payload"]
+        client_data = cast(dict[str, str], json.loads(client_info_json))
+        encrypted_payload = client_data["payload_b64"]
         decrypted_payload = decrypt_payload(encrypted_payload, encryption_key)
-        
+
         parts = decrypted_payload.split(":")
         client_info = ClientInfo(
             ip=parts[0],
@@ -53,31 +52,28 @@ def main() -> None:
         )
         logging.info("Payload decrypted successfully.")
 
-        # Step 3: Validate secrets for the chosen mode
-        if mode in ["direct-connect", "hole-punch"] and not wg_private_key:
-            raise AppError("WG_PRIVATE_KEY secret is required for this mode.")
-        if mode in ["xray", "xray-direct"] and not xray_uuid:
-            raise AppError("XRAY_UUID secret is required for this mode.")
+        # Step 3: Set up the common environment BEFORE mode-specific logic.
+        base_setup.setup_common_environment(BASE_DIR)
 
-        # Step 4: Run setup
-        logging.info(f"--- Setting up mode '{mode}' ---")
-        base.setup_common_environment(BASE_DIR)
+        # Step 4: Validate secrets and run mode-specific logic.
+        if mode in ["direct-connect", "hole-punch"]:
+            wg_private_key = get_env_or_fail("WG_PRIVATE_KEY")
+            wireguard_args = (client_info, wg_private_key, BASE_DIR, CONFIG_DIR)
+            if mode == "direct-connect":
+                wireguard.setup_client_mode(*wireguard_args)
+            else: # hole-punch
+                wireguard.setup_server_mode(*wireguard_args)
 
-        artifact_created = False
-        if mode == "direct-connect":
-            wireguard.setup_wireguard_client(client_info, wg_private_key, BASE_DIR, CONFIG_DIR)
-        elif mode == "hole-punch":
-            # The setup function now needs to return a boolean if it creates an artifact
-            artifact_created = wireguard.setup_wireguard_server(client_info, wg_private_key, BASE_DIR, CONFIG_DIR)
-        elif mode == "xray":
-            xray.setup_xray(client_info, cast(str, xray_uuid), BASE_DIR, CONFIG_DIR)
-        elif mode == "xray-direct":
-            xray.setup_xray_direct(client_info, cast(str, xray_uuid), BASE_DIR, CONFIG_DIR)
 
-        # Step 5: Set an output for the workflow to know if an artifact was made
-        # This is how we communicate back to the YAML file.
-        if artifact_created:
-            print("::set-output name=artifact_created::true")
+        elif mode in ["xray", "xray-direct"]:
+            xray_uuid = get_env_or_fail("XRAY_UUID")
+            xray_args = (client_info, xray_uuid, BASE_DIR, CONFIG_DIR)
+            if mode == "xray":
+                xray_warp.setup_service(*xray_args)
+            else: # xray-direct
+                xray_direct.setup_service(*xray_args)
+        else:
+             raise AppError(f"Unknown mode '{mode}' received.")
 
         logging.info("--- V2 Workflow Finished Successfully ---")
 

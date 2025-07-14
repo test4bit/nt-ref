@@ -1,0 +1,13 @@
+{
+  "include": [
+    "gh_runner_service",
+    "scripts"
+  ],
+
+  "reportMissingImports": true,
+  "reportUndefinedVariable": true,
+
+
+  "pythonVersion": "3.12",
+  "pythonPlatform": "Linux"
+}

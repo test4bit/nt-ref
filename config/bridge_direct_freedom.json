@@ -1,0 +1,70 @@
+{
+  "log": {
+    "loglevel": "none"
+  },
+
+  "reverse": {
+    "bridges": [
+      {
+        "tag": "bridge",
+        "domain": "reverse.hellohabr.com"
+      }
+    ]
+  },
+  "outbounds": [
+    {
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          {
+            "address": "__CLIENT_IP_PLACEHOLDER__",
+            "port": 443,
+            "users": [
+              {
+                "id": "__XRAY_UUID_PLACEHOLDER__",
+                "encryption": "none",
+                "flow": "xtls-rprx-vision"
+              }
+            ]
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+          "fingerprint": "chrome",
+          "serverName": "cloudflare.com",
+          "publicKey": "pNVkQojVsBa8lQZI9GKZOXJIyMdCSRYmhAJEbZcQlns",
+          "spiderX": "",
+          "shortId": ""
+        }
+      },
+      "tag": "outgoing"
+    },
+    {
+      "protocol": "freedom",
+      "tag": "direct"
+    },
+    {
+      "protocol": "blackhole",
+      "tag": "block"
+    }
+  ],
+  "routing": {
+    "rules": [
+      {
+        "type": "field",
+        "inboundTag": ["bridge"],
+        "domain": ["full:reverse.hellohabr.com"],
+        "outboundTag": "outgoing"
+      },
+      {
+        "type": "field",
+        "inboundTag": ["bridge"],
+        "outboundTag": "direct"
+      }
+    ]
+  }
+}
+

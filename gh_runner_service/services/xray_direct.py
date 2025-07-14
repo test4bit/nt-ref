@@ -2,33 +2,54 @@
 import json
 import logging
 from pathlib import Path
+from typing import cast
 
-from ..common.utils import run_command
 from ..common.exceptions import AppError
-from ..models import ClientInfo
+from ..common.models import (
+    ClientInfo,
+    XrayConfig,
+    XrayVlessOutbound,
+)
+from ..common.utils import run_command
 
 def setup_service(client: ClientInfo, uuid: str, base_dir: Path, config_dir: Path) -> None:
-    """Configures and runs a direct-connection Xray server (no WARP)."""
-    logging.info("Setting up Xray server in DIRECT mode.")
-    run_command("sudo sysctl -w net.core.default_qdisc=fq")
-    run_command("sudo sysctl -w net.ipv4.tcp_congestion_control=bbr")
+    """
+    Configures and runs an Xray reverse tunnel that routes traffic
+    directly to the internet via the 'freedom' protocol.
+    """
+    logging.info("Setting up Xray server in DIRECT (Freedom) mode.")
+    # BBR commands are good practice for network performance.
+    _ = run_command("sysctl -w net.core.default_qdisc=fq")
+    _ = run_command("sysctl -w net.ipv4.tcp_congestion_control=bbr")
 
-    config_path = config_dir / "direct.json"
+    # Load the new config file specifically designed for this mode.
+    config_path = config_dir / "bridge_direct_freedom.json"
     if not config_path.exists():
-        raise AppError(f"Direct Xray config not found: {config_path}")
+        raise AppError(f"Direct Freedom Xray config not found: {config_path}")
+
     with open(config_path) as f:
-        xray_config = json.load(f)
+        xray_config = cast(XrayConfig, json.load(f))
 
-    xray_config["inbounds"][0]["settings"]["clients"][0]["id"] = uuid
+    # This logic is essential: we must configure the VLESS client within Xray
+    # to connect back to the user's VLESS server.
+    vless_found = False
+    for outbound in xray_config["outbounds"]:
+        if outbound["protocol"] == "vless":
+            vless_outbound = cast(XrayVlessOutbound, outbound)
+            # Set the user's VLESS server IP and authentication UUID.
+            vless_outbound["settings"]["vnext"][0]["address"] = client.ip
+            vless_outbound["settings"]["vnext"][0]["users"][0]["id"] = uuid
+            vless_found = True
+            break
 
-    run_command("sudo openssl ecparam -genkey -name prime256v1 -out /etc/ssl/private/xray.key")
-    run_command(f"sudo openssl req -new -x509 -days 365 -key /etc/ssl/private/xray.key -out /etc/ssl/certs/xray.crt -subj '/CN={client.ip}'")
+    if not vless_found:
+        raise AppError("Could not find a VLESS outbound to configure in bridge_direct_freedom.json")
 
     final_config_path = base_dir / "bridge-final.json"
     with open(final_config_path, "w") as f:
         json.dump(xray_config, f, indent=2)
-    
-    logging.info("Direct Xray configuration generated successfully.")
+
+    logging.info("Direct Xray (Freedom) configuration generated successfully.")
     xray_executable_path = base_dir / "bin/xray"
-    run_command(f"sudo {xray_executable_path} run -c {final_config_path}")
-    run_command("sleep 365d")
+    _ = run_command(f"{xray_executable_path} run -c {final_config_path}")
+    _ = run_command("sleep 365d")

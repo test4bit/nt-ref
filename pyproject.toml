@@ -1,0 +1,15 @@
+[tool.mypy]
+# --- Basic Setup ---
+python_version = "3.12"  # Set your target Python version
+mypy_path = "."          # Crucial: Tells mypy to look for modules starting from the root
+
+# --- Strictness and Code Quality ---
+strict = true                      # Enable all optional strict checks
+warn_unused_ignores = true         # Warn if a '# type: ignore' is no longer needed
+warn_redundant_casts = true        # Warn about unnecessary casts
+warn_unreachable = true            # Warn about code that can never be executed
+
+# --- Import Handling ---
+# This is important for dealing with third-party libraries.
+# By default, `strict = true` sets this to false.
+ignore_missing_imports = false     # Fail if a library has no type hints (stubs)
