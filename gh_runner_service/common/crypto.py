@@ -7,7 +7,8 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.exceptions import InvalidTag
 
-from .exceptions import AppError
+from .exceptions import AppError, CryptographyError
+
 
 SALT = b'gha-nat-traversal-salt'
 ITERATIONS = 480_000
@@ -43,6 +44,10 @@ def decrypt_payload(encrypted_payload_b64: str, master_key_hex: str) -> str:
         decrypted_bytes = aesgcm.decrypt(nonce, ciphertext, None)
         return decrypted_bytes.decode('utf-8')
     except InvalidTag:
-        raise AppError("Decryption failed: Invalid authentication tag. The key may be incorrect or the payload corrupted.")
+        raise CryptographyError(
+            "Decryption failed: Invalid authentication tag. "
+            "The key may be incorrect or the payload corrupted."
+        )
     except Exception as e:
-        raise AppError(f"Pure Python decryption failed: {e}")
+        raise CryptographyError(f"Pure Python decryption failed: {e}")
+
