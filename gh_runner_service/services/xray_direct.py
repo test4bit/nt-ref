@@ -2,13 +2,20 @@
 import json
 import logging
 import time
-from datetime import timedelta  
+from datetime import timedelta
 from pathlib import Path
 from typing import cast
 
 from ..common.exceptions import AppError
 from ..common.models import ClientInfo, XrayConfig, XrayVlessOutbound
 from ..common.utils import manage_process, run_command
+
+# --- Constants ---
+XRAY_CONFIG_TEMPLATE = "bridge_direct_freedom.json"
+XRAY_FINAL_CONFIG = "bridge-final.json"
+XRAY_EXECUTABLE = "bin/xray"
+
+PROTOCOL_VLESS = "vless"
 
 
 def setup_service(client: ClientInfo, uuid: str, base_dir: Path, config_dir: Path) -> None:
@@ -20,7 +27,7 @@ def setup_service(client: ClientInfo, uuid: str, base_dir: Path, config_dir: Pat
     _ = run_command("sysctl -w net.core.default_qdisc=fq", check=False)
     _ = run_command("sysctl -w net.ipv4.tcp_congestion_control=bbr", check=False)
 
-    config_path = config_dir / "bridge_direct_freedom.json"
+    config_path = config_dir / XRAY_CONFIG_TEMPLATE
     if not config_path.exists():
         raise AppError(f"Direct Freedom Xray config not found: {config_path}")
 
@@ -29,7 +36,7 @@ def setup_service(client: ClientInfo, uuid: str, base_dir: Path, config_dir: Pat
 
     vless_found = False
     for outbound in xray_config["outbounds"]:
-        if outbound["protocol"] == "vless":
+        if outbound["protocol"] == PROTOCOL_VLESS:
             vless_outbound = cast(XrayVlessOutbound, outbound)
             vless_outbound["settings"]["vnext"][0]["address"] = client.ip
             vless_outbound["settings"]["vnext"][0]["users"][0]["id"] = uuid
@@ -37,14 +44,15 @@ def setup_service(client: ClientInfo, uuid: str, base_dir: Path, config_dir: Pat
             break
 
     if not vless_found:
-        raise AppError("Could not find a VLESS outbound in bridge_direct_freedom.json")
+        raise AppError(f"Could not find a VLESS outbound in {XRAY_CONFIG_TEMPLATE}")
 
-    final_config_path = base_dir / "bridge-final.json"
+    final_config_path = base_dir / XRAY_FINAL_CONFIG
     with open(final_config_path, "w") as f:
         json.dump(xray_config, f, indent=2)
 
     logging.info("Direct Xray (Freedom) configuration generated successfully.")
-    xray_executable_path = base_dir / "bin/xray"
+
+    xray_executable_path = base_dir / XRAY_EXECUTABLE
     command = f"{xray_executable_path} run -c {final_config_path}"
 
     with manage_process(command) as process:
