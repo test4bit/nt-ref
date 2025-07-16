@@ -8,7 +8,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from typing import cast
 
-from .exceptions import AppError
+from .exceptions import AppError, ConfigurationError, ProcessExecutionError
 
 
 def run_command(command: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -45,10 +45,10 @@ def run_command(command: str, check: bool = True) -> subprocess.CompletedProcess
 
         logging.error(f"STDOUT: {stdout_log}")
         logging.error(f"STDERR: {stderr_log}")
-        raise AppError(f"Execution failed for command: {command}") from e
+        raise ProcessExecutionError(f"Execution failed for command: {command}") from e
     except FileNotFoundError as e:
         logging.error(f"Command not found: {args[0]}")
-        raise AppError(f"Required command '{args[0]}' not found in PATH.") from e
+        raise ConfigurationError(f"Required command '{args[0]}' not found in PATH.") from e
 
 
 def run_background_command(command: str) -> subprocess.Popen[str]:
@@ -104,7 +104,7 @@ def get_env_or_fail(var_name: str) -> str:
     """Gets an environment variable or raises a specific error if not found."""
     value = os.getenv(var_name)
     if not value:
-        raise AppError(f"Required environment variable '{var_name}' is not set.")
+        raise ConfigurationError(f"Required environment variable '{var_name}' is not set.")
     return value
 
 
@@ -112,7 +112,7 @@ def check_dependencies(*cmds: str) -> None:
     """Checks if required command-line tools are installed."""
     for cmd in cmds:
         if subprocess.run(['which', cmd], capture_output=True).returncode != 0:
-            raise AppError(f"Required command '{cmd}' not found. Please install it and ensure it's in your PATH.")
+            raise ConfigurationError(f"Required command '{cmd}' not found. Please install it and ensure it's in your PATH.")
 
 
 def ensure_apt_command_installed(command_name: str, package_name: str | None = None) -> None:
