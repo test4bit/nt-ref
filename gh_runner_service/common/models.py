@@ -1,6 +1,6 @@
 # gh_runner_service/common/models.py
 from dataclasses import dataclass
-from typing import NotRequired, TypedDict
+from typing import TypedDict
 
 # --- Dataclass for Client Info ---
 @dataclass
@@ -102,7 +102,7 @@ class XrayOtherOutbound(TypedDict):
     protocol: str
     tag: str
     # Use `dict[str, object]` as a safer alternative to `dict[str, Any]`
-    settings: NotRequired[dict[str, object]]
+    settings: dict[str, object] | None
 
 # The final Outbound type is a union of all possible specific types,
 # using the modern `|` syntax.
