@@ -10,7 +10,7 @@ from cryptography.hazmat.primitives.asymmetric import x25519
 from requests import Session
 
 # Correctly import from the shared models and exceptions modules
-from ..common.exceptions import AppError
+from ..common.exceptions import AppError, ConfigurationError, NetworkError
 from ..common.models import WarpConfig
 
 # --- Type Definitions for the raw API response ---
@@ -82,7 +82,7 @@ class WarpApiClient:
             return cast(_WarpApiResponse, response.json())
         except requests.exceptions.RequestException as e:
             error_body = e.response.text if e.response else "No response body"
-            raise AppError(f"WARP API request failed: {e}. Body: {error_body}")
+            raise NetworkError(f"WARP API request failed: {e}. Body: {error_body}")
 
 
     def register_and_get_config(self) -> WarpConfig:
@@ -119,7 +119,7 @@ class WarpApiClient:
                 reserved_dec=list(reserved_bytes),
             )
         except (KeyError, IndexError) as e:
-            raise AppError(f"Failed to parse WARP API response due to missing data: {e}")
+            raise ConfigurationError(f"Failed to parse WARP API response due to missing data: {e}")
 
 
 def get_warp_config() -> WarpConfig:
