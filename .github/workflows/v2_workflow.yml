@@ -55,6 +55,7 @@ jobs:
               run: |
                   # Explicitly pass environment variables to sudo
                   sudo env \
+                    PATH="$PATH" \
                     GHA_PAYLOAD_KEY="${{ secrets.ENCRYPTION_KEY }}" \
                     WG_PRIVATE_KEY="${{ secrets.PRIVATEKEY }}" \
                     XRAY_UUID="${{ secrets.UUID }}" \
